@@ -1,0 +1,46 @@
+#Datalake ACCESS CALL using machine identity
+C:\Windows\azcopy\azcopy.exe login --identity
+$env:ACCOUNT_NAME = "test";
+
+#VARIABLES DEFINED SECTION (REUSE IF WANTED)
+$previoustimestamp = (get-date).AddDays(-1).ToString("yyyMMdd") | foreach {$_ -replace ":", "."} #PREVIOUS DAYS TIMESTAMP ETL
+$currenttimestamp = (get-date).ToString("yyyMMdd") | foreach {$_ -replace ":", "."} #Todays TIMESTAMP ETL
+$DATALAKENONPROD = "https://test.dfs.core.windows.net/staging/PBIAPI/" #DatalakePowerBIPathNONPROD
+
+#DEPENDENT ON NEEDS VARIABLES (CHANGE EVERY JOB SPECIFIC)
+$FIRSTURL = 'https://api.powerbi.com/v1.0/myorg/admin/dataflows' #URL to get necessary information
+$LASTAPIPARAM = '/datasources'
+$folderPath = "C:\Users\admin\DataFlowDevelopers_$currenttimestamp.csv" #Path depending on what you are pulling down for the particular job
+$DATALAKEFOLDERPATH = "Dataflow_Developers/DataFlowDevelopers_$currenttimestamp.csv" #path depending on what you are pulling and just created in datalake to import data daily/etc
+$FINALFOLDERPATH = "C:\Users\admin\DataflowDatasources_$currenttimestamp.csv"
+
+
+#Credentials Section (RESUSE for any PBI ACCESS JOB)
+$file= "C:\Users\admin\test.txt"
+$User = "test"
+$Credential = New-Object -TypeName System.Management.Automation.PSCredential `
+-ArgumentList $User, (Get-Content $File | ConvertTo-SecureString) #getting secured credentials from encrypted file on local machine
+Connect-PowerBIServiceAccount -Credential $Credential #call to connect and auth PBI
+
+#SCRIPT TO BRING RELEVANT DATA FROM REST API FOR ITERATION
+$data= Invoke-PowerBIRestMethod -url $FIRSTURL -method Get | ConvertFrom-Json  #invoking the rest method and convertying the json response to CSV delimited
+$data | foreach-Object { $_.value } | Select-Object | Export-Csv -path $folderpath  #EXPORTS LOCAL COPY OF DAYS DATA TO CSV ON LOCAL MACHINE
+
+
+#ITERATE AND PASS PARAMETERS ONE BY ONE FROM ABOVE TO GIVE DATA FOR EACH ELEMENT WE NEED BELOW
+$Ids = import-csv $folderPath 
+Foreach ($Id in $Ids) {
+$MAINURL  = 'https://api.powerbi.com/v1.0/myorg/admin/dataflows/' + $Id.Id + $LASTAPIPARAM
+$allinfo = Invoke-PowerBIRestMethod -Url $MAINURL -Method Get -ErrorAction SilentlyContinue | ConvertFrom-Json 
+#DEFINE IN @{1= WHAT COLUMN NAME YOU NEED TO DESCRIBE WHAT ID YOU PASSED IN FIRST API PARAMETER SO YOU HAVE PARENT ID OF WHAT YOU ITERATED THROUGH AND IN SELECT-OBJECT WILDCARD GETS ALL INHERENT VARIABLES, ONLY CHANGE IS ADDING THE COLUMN OF THE PARENT ID YOU JUST ITERATED THROUGH FOR CONNECTION
+$allinfo | foreach-Object { $_.value} | Select-Object *,@{l="dataflowid";e={$Id.Id}} | Export-Csv $FinalFolderPath -Append } 
+
+
+
+#DATALAKE EXPORT INSTEAD OF FILE
+C:\Windows\azcopy\azcopy.exe copy $FinalFolderPath $DATALAKENONPROD$DATALAKEFOLDERPATH --overwrite=FALSE --follow-symlinks --recursive --from-to=LocalBlobFS --put-md5
+Remove-Item $folderPath
+Remove-Item $FinalFolderPath #REMOVES LOCAL COMPUTER COPY OF WHAT WAS JUST IMPORTED INTO DATALAKE
+
+
+
