@@ -4,6 +4,7 @@ $tableName = "InactiveMemory_Metrics"
 $datalakeFolder = "InactiveMemory_Metrics"
 $dailyDateofData = (get-date).AddDays(-1).ToString("yyyMMdd") | foreach {$_ -replace ":", "."}
 $Global:Logfilepath = ComputeNewValue $tableName
+$logtime = (get-date).ToString("yyyMMdd_HH:mm:ss") | foreach {$_ -replace ":", "."}
 
 Try {
 Write-Log -Message 'AzCopy Initial Login Using Machine Identity' -Type "Script_CommandStart"
@@ -22,6 +23,22 @@ $file_name= $tableName + "_" +  $dailyDateofData
 $datalakeFinalPath = $datalakePath + $datalakeFolder + "/" + $tableName + "_" + $dailyDateofData + ".csv"
 
 
+$query = ComputeNewDataCheckQuery DatasetSize
+$latestrefresh = ComputeNewDataCheckQuery Timestamps
+$sourcemetrics = PbiPremiumDataCheckInt "$query" $auth
+$hours = PbiPremiumDataCheckInt "$latestrefresh" $auth
+
+IF($hours.'[Hours]' -lt 24)
+{ Write-Log -message ("Not all data is in source. Less than 24 hours," + $hours.'[Hours]' + " " + "hours exist in current source for yesterday's hourly data") -type "DataIntegrityError"
+if(![System.IO.File]::Exists($Logfilepath))
+{ }
+else
+{
+Move-Item -Path $Logfilepath -Destination ("C:\Program Files\WindowsPowerShell\Logs\PBIPREMIUMLOGS\" + $tableName + "_" + $logtime + ".csv") }}
+
+else
+{
+
 #QUERYFUNCTION
 Try {
 Write-Log -Message 'Initiating Export-PbiPremiumData Function from Module PBIPREMIUM' -Type "CommandStart"
@@ -30,7 +47,7 @@ Export-PbiPremiumData "EVALUATE CALCULATETABLE (Filter(InactiveMemoryMetrics,DAT
 catch
 {Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName) }
 
-Write-Log -Message "Initiating Export-PbiPremiumData Function from Module PBIPREMIUM" -Type "CommandEnd"
+Write-Log -Message ("Initiating Export-PbiPremiumData Function from Module PBIPREMIUM" + $sourcemetrics.'[Hours]' + " " + "exist of use for yesterday") -Type "CommandEnd"
 
 Try{
 Write-Log -Message 'Copying CSV File to Datalake Folder Path and returning AZcopy JobID' -Type "CommandStart"
@@ -80,4 +97,5 @@ if(![System.IO.File]::Exists($Logfilepath))
 { }
 else
 {
-Move-Item -Path $Logfilepath -Destination ("C:\Program Files\WindowsPowerShell\Logs\PBIPREMIUMLOGS\" + $tableName + "_" + $currentDay_yyyMMdd + ".csv") }
+Move-Item -Path $Logfilepath -Destination ("C:\Program Files\WindowsPowerShell\Logs\PBIPREMIUMLOGS\" + $tableName + "_" + $logtime + ".csv") }
+}

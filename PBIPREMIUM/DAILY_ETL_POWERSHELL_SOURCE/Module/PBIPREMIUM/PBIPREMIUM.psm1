@@ -1,15 +1,16 @@
-﻿$global:folderFullPath = 'C:\Users\bvadmin\PBIPREMIUM\'
-$env:ACCOUNT_NAME = "ngddatalake"
+﻿$global:folderFullPath = 'C:\Users\test\PBIPREMIUM\'
+$env:ACCOUNT_NAME = "test"
 $env:AZCOPY_LOG_LOCATION = "C:\Program Files\WindowsPowerShell\Logs\AZCOPYLOGS"
 $env:AZCOPY_JOB_PLAN_LOCATION = "C:\Program Files\WindowsPowerShell\Logs\AZCOPYPLANS"
 $global:previousDay_yyyMMdd = (get-date).AddDays(-1).ToString("yyyMMdd") | foreach {$_ -replace ":", "."}
-$global:currentDay_yyyMMdd = (get-date).ToString("yyyMMdd") | foreach {$_ -replace ":", "."}
+$global:currentDay_yyyMMdd = (get-date).ToString("yyyMMdd_HH:mm:ss") | foreach {$_ -replace ":", "."}
 $global:Logfilepath = $null
-$global:pbiAdminCredFile= "C:\Users\bvadmin\powerbicredssecure.txt"
-$global:pbiAdminUserName = "mccunnt@bv.com"
-$global:datalakePath = "https://ngddatalake.dfs.core.windows.net/staging/PBIPREMIUM/"
-$global:logDatalakePath = "https://ngddatalake.dfs.core.windows.net/staging/Logs/PBIPREMIUM/"
+$global:pbiAdminCredFile= "C:\Users\test\powerbicredssecure.txt"
+$global:pbiAdminUserName = "test@test.com"
+$global:datalakePath = "https://test.dfs.core.windows.net/staging/PBIPREMIUM/"
+$global:logDatalakePath = "https://test.dfs.core.windows.net/staging/Logs/PBIPREMIUM/"
 $global:AZCOPYMessageContent = $null
+$global:sourceTable = $null
 $global:AZCOPYMessageType = (C:\Windows\azcopy\azcopy.exe jobs list --output-type json | ConvertFrom-Json | Select-Object MessageType -OutVariable string -First 1)
 $global:credential = New-Object -TypeName System.Management.Automation.PSCredential `
  -ArgumentList $pbiAdminUserName, (Get-Content $pbiAdminCredFile | ConvertTo-SecureString) 
@@ -30,6 +31,12 @@ function ComputeNewValueazcopy ($jobsid)
 {
    C:\Windows\azcopy\azcopy.exe jobs show "$jobsid"  --output-type json  | ConvertFrom-Json | Select-Object MessageContent -OutVariable string -First 1
 }
+
+function ComputeNewDataCheckQuery ($sourceTable)
+{
+   "EVALUATE SUMMARIZE(Filter(" + $sourceTable + "," + "DATEDIFF(" + $sourceTable + "[timestamp]" + "," + "TODAY()" +"," + "DAY" + ")" + "=1" + ")" + "," + '"Hours"' +"," + "DISTINCTCOUNT(" + $sourceTable + "[timestamp]" + "))"
+}
+
 
 function Write-Log
 {
@@ -139,6 +146,74 @@ catch
 { Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName) 
 }
 }
+
+function PbiPremiumDataCheckInt{
+    param(
+        [string]$DAXQuery,
+        [string]$Auth
+    )
+
+    Try { Write-Log -Message 'Connect-PowerBIServiceAccount -Credential $credential' -Type "CommandStart"
+    Connect-PowerBIServiceAccount -Credential $credential
+    }
+    catch
+    { Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName) }
+    Write-Log -Message 'Connect-PowerBIServiceAccount -Credential $credential' -Type "CommandEnd"
+
+    #$outFile = "$OutputFolder\$OutputName.csv"
+    $auth = (Get-PowerBIAccessToken).Authorization
+    $UserName = $credential.UserName
+    $PlainPassword = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password))
+    $datasets = 
+    Try { Write-Log -Message 'Invoke-PowerBIRestMethod -Method Get -Url "https://api.powerbi.com/v1.0/myorg/datasets" | ConvertFrom-Json' -Type "CommandStart"
+     Invoke-PowerBIRestMethod -Method Get -Url "https://api.powerbi.com/v1.0/myorg/datasets" | ConvertFrom-Json 
+     }
+     catch
+{
+	Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName)
+}
+Write-Log -Message 'Invoke-PowerBIRestMethod -Method Get -Url "https://api.powerbi.com/v1.0/myorg/datasets" | ConvertFrom-Json' -Type "CommandEnd"
+
+    $premiumAppDataset = $datasets |        
+        foreach-Object { $_.value } |
+        Where-Object { $_.name -eq "Power BI Premium Capacity Metrics"} |
+        Select-Object -First 1
+
+    if($premiumAppDataset){
+    Try {
+    Write-Log -Message 'Creating Premium Capacity Metrics App OLEDB MSOLAP Connection to Extract Information' -Type "CommandStart"
+        $region = ([System.Uri]$datasets.'@odata.context').Host
+        $datasetId = $premiumAppDataset.id
+        $cs = "Provider=MSOLAP;Data Source=https://analysis.windows.net/powerbi/api;;Initial Catalog=$datasetId;Location=https://$region/xmla?vs=sobe_wowvirtualserver&db=$datasetId;MDX Compatibility= 1; MDX Missing Member Mode= Error; Safety Options= 2; Update Isolation Level= 2; Locale Identifier= 1033;User Id = $UserName; Password=$PlainPassword"
+        $connection = New-Object System.Data.OleDb.OleDbConnection $cs
+        $connection.Open()
+        $command = New-Object System.Data.OleDb.OleDbCommand -ArgumentList $DAXQuery, $connection
+        $rdr = $command.ExecuteReader()
+        $result = New-Object System.Collections.ArrayList
+        while($rdr.Read()){
+            $properties = @{}
+            for($fieldIndex = 0; $fieldIndex -lt $rdr.FieldCount; $fieldIndex ++){
+                $properties[$rdr.GetName($fieldIndex)] = $rdr[$fieldIndex]
+            }
+            $row = New-Object PSObject -Property $properties
+            $void = $result.Add($row)
+        }
+        $rdr.Close()
+        $connection.Close()        
+        $result | Select-Object * -OutVariable Int
+         #| Export-Csv -Path $outFile -NoTypeInformation -Force
+        }
+        catch
+        {
+        Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName)
+        }
+       Write-Log -Message 'Creating Premium Capacity Metrics App OLEDB MSOLAP Connection to Extract Information' -Type "CommandEnd" 
+    }
+    else{
+        Write-Log -Message "Premium Capacity Metrics app not found. Please install the app and try again."   -Type "Exception-AppNotFoundorInstalled"     
+    }
+    }
+
 
 function Get-ResultSize { 
 param(
