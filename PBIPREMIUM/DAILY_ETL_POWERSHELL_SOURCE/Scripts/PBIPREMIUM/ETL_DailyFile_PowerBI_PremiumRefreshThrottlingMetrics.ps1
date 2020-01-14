@@ -1,7 +1,7 @@
 ﻿Import-Module PBIPREMIUM
 #SELECT ACTIVITY PARAMAETERS
-$tableName = "Refresh_Metrics"
-$datalakeFolder = "Refresh_Metrics"
+$tableName = "RefreshThrottlingMetrics"
+$datalakeFolder = "RefreshThrottling_Metrics"
 $dailyDateofData = (get-date).AddDays(-1).ToString("yyyMMdd") | foreach {$_ -replace ":", "."}
 $Global:Logfilepath = ComputeNewValue $tableName
 $logtime = (get-date).ToString("yyyMMdd_HH:mm:ss") | foreach {$_ -replace ":", "."}
@@ -40,7 +40,7 @@ else
 #QUERYFUNCTION
 Try {
 Write-Log -Message 'Initiating Export-PbiPremiumData Function from Module PBIPREMIUM' -Type "CommandStart"
-Export-PbiPremiumData "EVALUATE CALCULATETABLE (Filter(RefreshMetricsV2, DATEDIFF(RefreshMetricsV2[timestamp],TODAY(),DAY)=1))" "$file_name" $folderFullPath $auth
+Export-PbiPremiumData "EVALUATE CALCULATETABLE (Filter(RefreshThrottlingMetrics, DATEDIFF(RefreshThrottlingMetrics[timestamp],TODAY(),DAY)=1))" "$file_name" $folderFullPath $auth
 }
 catch
 {Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName) }

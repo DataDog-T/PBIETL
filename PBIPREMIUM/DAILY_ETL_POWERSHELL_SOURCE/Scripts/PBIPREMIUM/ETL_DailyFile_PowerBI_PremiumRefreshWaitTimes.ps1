@@ -1,7 +1,7 @@
 ﻿Import-Module PBIPREMIUM
 #SELECT ACTIVITY PARAMAETERS
-$tableName = "Refresh_Metrics"
-$datalakeFolder = "Refresh_Metrics"
+$tableName = "RefreshWaitTimes"
+$datalakeFolder = "RefreshWait_Metrics"
 $dailyDateofData = (get-date).AddDays(-1).ToString("yyyMMdd") | foreach {$_ -replace ":", "."}
 $Global:Logfilepath = ComputeNewValue $tableName
 $logtime = (get-date).ToString("yyyMMdd_HH:mm:ss") | foreach {$_ -replace ":", "."}
@@ -22,7 +22,7 @@ $Fullpath = $folderFullPath + $tableName + "_" + $dailyDateofData + ".csv"
 $file_name= $tableName + "_" +  $dailyDateofData
 $datalakeFinalPath = $datalakePath + $datalakeFolder + "/" + $tableName + "_" + $dailyDateofData + ".csv"
 
-$query = ComputeNewDataCheckQuery RefreshMetrics
+$query = ComputeNewDataCheckQuery RefreshWaitTimes
 $latestrefresh = ComputeNewDataCheckQuery Timestamps
 $sourcemetrics = PbiPremiumDataCheckInt "$query" $auth
 $hours = PbiPremiumDataCheckInt "$latestrefresh" $auth
@@ -40,7 +40,7 @@ else
 #QUERYFUNCTION
 Try {
 Write-Log -Message 'Initiating Export-PbiPremiumData Function from Module PBIPREMIUM' -Type "CommandStart"
-Export-PbiPremiumData "EVALUATE CALCULATETABLE (Filter(RefreshMetricsV2, DATEDIFF(RefreshMetricsV2[timestamp],TODAY(),DAY)=1))" "$file_name" $folderFullPath $auth
+Export-PbiPremiumData "EVALUATE CALCULATETABLE (Filter(RefreshWaitTimes, DATEDIFF(RefreshWaitTimes[timestamp],TODAY(),DAY)=1))" "$file_name" $folderFullPath $auth
 }
 catch
 {Write-Log -Message $_.Exception.Message -Type ($_.Exception.GetType().FullName) }
